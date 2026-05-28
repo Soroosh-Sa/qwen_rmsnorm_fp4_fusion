@@ -1,0 +1,33 @@
+# Small-model first test configuration.
+# Change model_name_or_path to whichever Qwen checkpoint you want to test first.
+
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+folded_output_dir: outputs/qwen_folded_rmsnorm
+trust_remote_code: true
+dtype: bfloat16
+
+device_map: auto
+max_memory_per_gpu: null
+
+# Verification settings
+verify:
+  batch_size: 2
+  seq_len: 16
+  num_layers_to_check: 4
+  atol: 0.002
+  rtol: 0.002
+  prompts:
+    - "Hello, my name is"
+    - "Explain GPU kernel fusion in one sentence."
+    - "What is RMSNorm?"
+
+# Which linear layers receive gamma folding.
+# Qwen attention: input_layernorm feeds q/k/v projections.
+# Qwen MLP: post_attention_layernorm feeds gate/up projections.
+folding:
+  attention_linears: [q_proj, k_proj, v_proj]
+  mlp_linears: [gate_proj, up_proj]
+  set_norm_weights_to_one: true
+
+metrics_dir: metrics
+logs_dir: logs

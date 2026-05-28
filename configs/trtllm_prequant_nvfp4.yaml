@@ -1,0 +1,5 @@
+enable_iter_perf_stats: true
+kv_cache_config:
+  # Match the previous Vast AI TensorRT-LLM assignment default.
+  # Increase only after the server loads reliably.
+  free_gpu_memory_fraction: 0.70

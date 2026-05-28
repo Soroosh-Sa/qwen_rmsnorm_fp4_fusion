@@ -1,0 +1,44 @@
+# Main comparison requested for Runara AI experiments.
+# This intentionally avoids slow original BF16 runtime benchmarking.
+
+experiment_name: qwen_folded_quant_comparison
+
+models:
+  prequantized_nvfp4:
+    description: "Vendor/NVIDIA/HF pre-quantized NVFP4 checkpoint; no RMSNorm folding by us."
+    checkpoint: "${PREQUANTIZED_NVFP4_DIR}"
+    runtime: "tensorrt_llm"
+    precision: "nvfp4"
+    folded: false
+
+  folded_gptq_int4:
+    description: "Our RMSNorm-folded checkpoint quantized to GPTQ INT4. This is INT4, not FP4."
+    checkpoint: "${FOLDED_GPTQ_INT4_DIR}"
+    runtime: "selected_gptq_runtime"
+    precision: "gptq_int4"
+    folded: true
+
+  folded_trtllm_nvfp4:
+    description: "Our RMSNorm-folded checkpoint quantized/exported to NVFP4 for TensorRT-LLM."
+    checkpoint: "${FOLDED_TRTLLM_NVFP4_DIR}"
+    runtime: "tensorrt_llm"
+    precision: "nvfp4"
+    folded: true
+
+metrics:
+  latency:
+    - ttft_ms
+    - end_to_end_ms
+    - tokens_per_second
+  memory:
+    - peak_gpu_memory_gb
+    - engine_or_checkpoint_size_gb
+  quality:
+    - prompt_logit_agreement_sample_optional
+    - perplexity_optional
+    - task_accuracy_optional
+
+notes:
+  - "GPTQ/AWQ are 4-bit integer baselines, not FP4."
+  - "NVFP4 is the true FP4 path for Blackwell/TensorRT-LLM."
+  - "The pre-quantized NVFP4 model replaces original BF16 as the main runtime baseline."

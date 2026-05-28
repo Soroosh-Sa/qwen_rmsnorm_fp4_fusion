@@ -1,0 +1,14 @@
+{
+  "assignment_mapping": {
+    "single_user_inference": "1K and 8K, concurrency=1",
+    "multi_user_inference": "1K and 8K, concurrency>1",
+    "long_context_evaluation": "32K, 64K, 128K",
+    "concurrent_chat_sessions": "chat_session prompt profile at 1K/8K under concurrency",
+    "parallel_code_generation": "parallel_code_generation prompt profile at 1K/8K under concurrency",
+    "sustained_throughput_testing": "sustained_throughput prompt profile with many requests at fixed concurrency"
+  },
+  "default_runs": [
+    {"script": "scripts/run_assignment_baseline.sh", "description": "baseline context scaling and long-context evaluation"},
+    {"script": "scripts/run_assignment_extra_scenarios.sh", "description": "chat, code generation, and sustained throughput workloads"}
+  ]
+}

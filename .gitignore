@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+checkpoints/*
+outputs/*
+logs/*
+metrics/*
+!checkpoints/.gitkeep
+!outputs/.gitkeep
+!logs/.gitkeep
+!metrics/.gitkeep
