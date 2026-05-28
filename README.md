@@ -348,3 +348,15 @@ bash scripts/run_selected_nvfp4_pair_benchmark.sh
 ```
 
 This is the correct next stage before moving to the 480B model: compare **small original NVFP4** vs **small folded NVFP4** first.
+
+### Engine serving note
+
+For locally quantized TensorRT-LLM NVFP4 checkpoints, build and validate engines before serving:
+
+```bash
+bash scripts/build_selected_nvfp4_pair_engines.sh
+bash scripts/validate_selected_engine_dirs.sh
+bash scripts/run_selected_nvfp4_pair_engine_benchmark.sh
+```
+
+The engine serving path forces `--backend tensorrt` and validates that `.engine`/`.plan` files exist before starting the server.

@@ -36,6 +36,7 @@ if [[ "$CLEAN_ENGINE_DIR" == "1" ]]; then
   rm -rf "$ENGINE_DIR"
 fi
 mkdir -p "$ENGINE_DIR"
+mkdir -p runtime_logs
 
 build_supports_option() {
   local opt="$1"
@@ -71,7 +72,13 @@ if [[ -n "${WORKERS:-}" ]]; then
 fi
 
 echo "Command: trtllm-build ${BUILD_ARGS[*]}"
-trtllm-build "${BUILD_ARGS[@]}"
+BUILD_LOG="${BUILD_LOG:-runtime_logs/build_$(basename "$ENGINE_DIR").log}"
+echo "Build log: $BUILD_LOG"
+# Use tee so errors remain visible and the full build output is saved.
+trtllm-build "${BUILD_ARGS[@]}" 2>&1 | tee "$BUILD_LOG"
+
+echo "Validating built engine directory..."
+python3 src/validate_trtllm_engine_dir.py --engine-dir "$ENGINE_DIR" --expected-tp "${TP_SIZE:-}"
 
 # Keep tokenizer/generation metadata beside the engine for trtllm-serve/OpenAI API convenience.
 for f in tokenizer.json tokenizer_config.json generation_config.json special_tokens_map.json vocab.json merges.txt config.json; do
@@ -80,4 +87,4 @@ for f in tokenizer.json tokenizer_config.json generation_config.json special_tok
   fi
 done
 
-echo "Engine build finished: $ENGINE_DIR"
+echo "Engine build finished and validated: $ENGINE_DIR"
