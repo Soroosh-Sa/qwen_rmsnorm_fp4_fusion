@@ -287,3 +287,64 @@ MODEL_PROFILE=qwen3_8b
 ```
 
 See `docs/model_selection.md`.
+
+## v6 update: TensorRT-LLM / ModelOpt NVFP4 quantization scripts
+
+This version adds actual wrapper scripts around the TensorRT-LLM release-container quantizer:
+
+```bash
+/app/tensorrt_llm/examples/quantization/quantize.py
+```
+
+New scripts:
+
+```text
+scripts/quantize_trtllm_nvfp4.sh
+scripts/quantize_selected_original_nvfp4.sh
+scripts/quantize_selected_folded_nvfp4.sh
+scripts/run_small_nvfp4_quantization_pair.sh
+scripts/run_selected_nvfp4_pair_benchmark.sh
+```
+
+Controlled small-model flow:
+
+```bash
+export MODEL_ROOT=/workspace/models
+export MODEL_PROFILE=qwen25_05b
+export TP_SIZE=4
+export CALIB_SIZE=128
+export CALIB_MAX_SEQ_LENGTH=512
+
+bash scripts/download_selected_model.sh
+bash scripts/fold_selected_model_sharded.sh
+bash scripts/run_small_nvfp4_quantization_pair.sh
+```
+
+This creates:
+
+```text
+/workspace/models/<MODEL_TAG>-NVFP4
+/workspace/models/<MODEL_TAG>-FOLDED-NVFP4
+```
+
+For a faster smoke test:
+
+```bash
+CALIB_SIZE=16 CALIB_MAX_SEQ_LENGTH=256 bash scripts/run_small_nvfp4_quantization_pair.sh
+```
+
+After quantization, benchmark both selected small NVFP4 targets:
+
+```bash
+export MODEL_PROFILE=qwen25_05b
+export TP_SIZE=4
+export MAX_SEQ_LEN=4096
+export MAX_NUM_TOKENS=4096
+export CONTEXTS="1024 2048"
+export CONCURRENCIES="1"
+export NUM_REQUESTS=4
+
+bash scripts/run_selected_nvfp4_pair_benchmark.sh
+```
+
+This is the correct next stage before moving to the 480B model: compare **small original NVFP4** vs **small folded NVFP4** first.

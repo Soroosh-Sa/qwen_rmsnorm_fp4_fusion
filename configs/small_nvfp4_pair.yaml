@@ -1,0 +1,29 @@
+# Controlled small-model experiment before using 480B.
+# Same model, same TensorRT-LLM NVFP4 quantizer, only difference is RMSNorm folding.
+
+experiment_name: small_qwen_original_vs_folded_nvfp4
+
+models:
+  selected_original_nvfp4:
+    description: "Selected Qwen BF16 checkpoint quantized directly to TensorRT-LLM NVFP4."
+    checkpoint: "${ORIGINAL_NVFP4_PATH}"
+    source_checkpoint: "${ORIGINAL_MODEL_PATH}"
+    runtime: "tensorrt_llm"
+    precision: "nvfp4"
+    folded: false
+
+  selected_folded_nvfp4:
+    description: "Selected Qwen checkpoint after RMSNorm gamma folding, then quantized to TensorRT-LLM NVFP4."
+    checkpoint: "${FOLDED_NVFP4_PATH}"
+    source_checkpoint: "${FOLDED_BF16_PATH}"
+    runtime: "tensorrt_llm"
+    precision: "nvfp4"
+    folded: true
+
+recommended_order:
+  - download selected small Qwen
+  - fold selected small Qwen shard-by-shard
+  - quantize original small Qwen to NVFP4
+  - quantize folded small Qwen to NVFP4
+  - benchmark selected_original_nvfp4
+  - benchmark selected_folded_nvfp4

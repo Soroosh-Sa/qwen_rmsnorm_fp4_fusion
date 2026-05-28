@@ -24,6 +24,10 @@ case "$TARGET" in
     MODEL_PATH="${MODEL_PATH:-$ORIGINAL_MODEL_PATH}"
     CONFIG_PATH="${CONFIG_PATH:-configs/trtllm_prequant_nvfp4.yaml}"
     ;;
+  selected_original_nvfp4)
+    MODEL_PATH="${MODEL_PATH:-${ORIGINAL_NVFP4_PATH:-${MODEL_ROOT:-/workspace/models}/${MODEL_TAG}-NVFP4}}"
+    CONFIG_PATH="${CONFIG_PATH:-configs/trtllm_small_folded_nvfp4.yaml}"
+    ;;
   selected_folded_nvfp4)
     MODEL_PATH="${MODEL_PATH:-$FOLDED_NVFP4_PATH}"
     CONFIG_PATH="${CONFIG_PATH:-configs/trtllm_small_folded_nvfp4.yaml}"
@@ -33,7 +37,7 @@ case "$TARGET" in
     CONFIG_PATH="${CONFIG_PATH:-configs/trtllm_folded_gptq_int4.yaml}"
     ;;
   *)
-    echo "Unknown TARGET=$TARGET. Use prequant_nvfp4, folded_nvfp4, folded_gptq_int4, small_folded_nvfp4, selected_original, selected_folded_nvfp4, selected_folded_gptq_int4."
+    echo "Unknown TARGET=$TARGET. Use prequant_nvfp4, folded_nvfp4, folded_gptq_int4, small_folded_nvfp4, selected_original, selected_original_nvfp4, selected_folded_nvfp4, selected_folded_gptq_int4."
     exit 2
     ;;
 esac
