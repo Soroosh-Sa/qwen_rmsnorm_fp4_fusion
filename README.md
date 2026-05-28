@@ -364,3 +364,18 @@ The engine serving path forces `--backend tensorrt` and validates that `.engine`
 ## Engine serving note
 
 For built TensorRT-LLM engine directories, `scripts/serve_engine_target.sh` intentionally does **not** pass `--backend` by default. In recent TensorRT-LLM containers, the engine path should use the default C++/engine path. Passing `--backend pytorch` forces checkpoint loading, and passing `--backend tensorrt` can still fail in some builds with `assert os.path.isfile(weights_path)`. Leave `TRTLLM_ENGINE_BACKEND` unset unless debugging.
+
+
+## v13 note: engine config must not be overwritten
+
+If `trtllm-serve` reports `No weight files found in /workspace/engines/...-engine-tp*`, rebuild the engines with v13 scripts:
+
+```bash
+export CLEAN_ENGINE_DIR=1
+export TRTLLM_ENGINE_BACKEND=tensorrt
+bash scripts/build_selected_nvfp4_pair_engines.sh
+bash scripts/validate_selected_engine_dirs.sh
+bash scripts/run_selected_nvfp4_pair_engine_benchmark.sh
+```
+
+Older scripts copied the checkpoint `config.json` over the engine `config.json`. v13 preserves the engine config and stores the checkpoint config as `checkpoint_config.json`.

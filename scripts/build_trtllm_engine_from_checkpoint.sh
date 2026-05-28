@@ -79,12 +79,21 @@ trtllm-build "${BUILD_ARGS[@]}" 2>&1 | tee "$BUILD_LOG"
 
 echo "Validating built engine directory..."
 python3 src/validate_trtllm_engine_dir.py --engine-dir "$ENGINE_DIR" --expected-tp "${TP_SIZE:-}"
+python3 src/validate_trtllm_engine_config.py --engine-dir "$ENGINE_DIR"
 
 # Keep tokenizer/generation metadata beside the engine for trtllm-serve/OpenAI API convenience.
-for f in tokenizer.json tokenizer_config.json generation_config.json special_tokens_map.json vocab.json merges.txt config.json; do
+# Keep tokenizer/generation metadata beside the engine for trtllm-serve/OpenAI API convenience.
+# IMPORTANT: do NOT copy CHECKPOINT_DIR/config.json over ENGINE_DIR/config.json.
+# trtllm-build writes an engine config.json. Overwriting it with the checkpoint config
+# makes trtllm-serve treat the engine directory like a checkpoint directory and fail
+# with messages such as "No weight files found in <engine_dir>".
+for f in tokenizer.json tokenizer_config.json generation_config.json special_tokens_map.json vocab.json merges.txt special_tokens_map.json; do
   if [[ -f "$CHECKPOINT_DIR/$f" ]]; then
     cp -f "$CHECKPOINT_DIR/$f" "$ENGINE_DIR/$f" || true
   fi
 done
+if [[ -f "$CHECKPOINT_DIR/config.json" ]]; then
+  cp -f "$CHECKPOINT_DIR/config.json" "$ENGINE_DIR/checkpoint_config.json" || true
+fi
 
-echo "Engine build finished and validated: $ENGINE_DIR"
+echo "Engine build finished and validated without overwriting engine config.json: $ENGINE_DIR"

@@ -26,18 +26,18 @@ fi
 
 # Fail early if this directory is not actually a serialized TensorRT-LLM engine.
 python3 src/validate_trtllm_engine_dir.py --engine-dir "$ENGINE_DIR" --expected-tp "$TP_SIZE"
+python3 src/validate_trtllm_engine_config.py --engine-dir "$ENGINE_DIR"
 
 EXTRA_ARGS=(
   --host "$HOST"
   --port "$PORT"
 )
 # Engine serving note:
-# In recent TensorRT-LLM versions, `trtllm-serve serve <engine_dir>` uses the C++/engine path by default.
-# Passing `--backend pytorch` forces checkpoint loading, and on some NGC builds passing
-# `--backend tensorrt` still sends the request through the LLM API checkpoint-loader path.
-# Therefore the default for built engines is: DO NOT pass --backend at all.
-# Override only for local debugging, e.g. TRTLLM_ENGINE_BACKEND=pytorch.
-TRTLLM_ENGINE_BACKEND="${TRTLLM_ENGINE_BACKEND:-}"
+# For this TensorRT-LLM release, the default backend is PyTorch.
+# A built engine directory must be served with the TensorRT backend.
+# Previous repo versions accidentally overwrote ENGINE_DIR/config.json with the checkpoint
+# config, which caused even --backend tensorrt to fall back into checkpoint-loading logic.
+TRTLLM_ENGINE_BACKEND="${TRTLLM_ENGINE_BACKEND:-tensorrt}"
 if [[ -n "$TRTLLM_ENGINE_BACKEND" ]]; then
   if trtllm_supports_option --backend; then
     EXTRA_ARGS+=(--backend "$TRTLLM_ENGINE_BACKEND")
@@ -67,6 +67,6 @@ echo "MAX_SEQ_LEN=$MAX_SEQ_LEN"
 echo "MAX_NUM_TOKENS=$MAX_NUM_TOKENS"
 echo "EXTRA_ARGS=${EXTRA_ARGS[*]}"
 
-# Important: for engine dirs, keep the engine directory as MODEL and avoid --backend by default.
 # Syntax from TensorRT-LLM is: trtllm-serve serve [OPTIONS] MODEL, where MODEL may be a TensorRT engine path.
+# Keep ENGINE_DIR as the positional MODEL argument.
 trtllm-serve serve "${EXTRA_ARGS[@]}" "$ENGINE_DIR"
