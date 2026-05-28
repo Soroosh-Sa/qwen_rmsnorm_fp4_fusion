@@ -42,6 +42,26 @@ case "$TARGET" in
     ;;
 esac
 
+# TensorRT-LLM requires TP_SIZE to divide the model attention heads.
+# This prevents the common small-Qwen failure:
+#   AssertionError: self.num_heads % (tp_size * cp_size) == 0
+AUTO_ADJUST_TP_SIZE="${AUTO_ADJUST_TP_SIZE:-1}"
+TP_CHECK_OUT="$(python src/check_tp_compatibility.py --model "$MODEL_PATH" --tp-size "$TP_SIZE" --max-gpus "${MAX_GPUS_FOR_TP:-${GPU_COUNT:-16}}" --print-shell 2>/dev/null || true)"
+eval "$TP_CHECK_OUT"
+if [[ "${TP_COMPATIBLE:-1}" != "1" ]]; then
+  echo "WARNING: Requested TP_SIZE=$TP_SIZE is not compatible with MODEL_PATH=$MODEL_PATH"
+  echo "  num_attention_heads=${MODEL_NUM_ATTENTION_HEADS:-unknown}"
+  echo "  num_key_value_heads=${MODEL_NUM_KEY_VALUE_HEADS:-unknown}"
+  echo "  valid TP sizes: ${VALID_TP_SIZES:-unknown}"
+  if [[ "$AUTO_ADJUST_TP_SIZE" == "1" && -n "${SUGGESTED_TP_SIZE:-}" ]]; then
+    echo "Auto-adjusting TP_SIZE: $TP_SIZE -> $SUGGESTED_TP_SIZE"
+    TP_SIZE="$SUGGESTED_TP_SIZE"
+  else
+    echo "ERROR: Use a compatible TP_SIZE, e.g. TP_SIZE=${SUGGESTED_TP_SIZE:-1}." >&2
+    exit 3
+  fi
+fi
+
 EXTRA_ARGS=(
   --backend pytorch
   --host "$HOST"

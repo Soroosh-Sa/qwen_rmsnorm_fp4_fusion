@@ -63,6 +63,26 @@ QUANT_LOG_DIR="${QUANT_LOG_DIR:-quantization_reports/$(basename "$OUTPUT_DIR") }
 QUANT_LOG_DIR="$(echo "$QUANT_LOG_DIR" | xargs)"
 mkdir -p "$OUTPUT_DIR" "$QUANT_LOG_DIR"
 
+# TensorRT-LLM requires tensor parallelism to divide model attention heads.
+# Small Qwen models often cannot use TP_SIZE=4 (for example Qwen2.5-0.5B has
+# 14 attention heads and 2 KV heads, so valid TP sizes are 1 or 2).
+AUTO_ADJUST_TP_SIZE="${AUTO_ADJUST_TP_SIZE:-1}"
+TP_CHECK_OUT="$(python src/check_tp_compatibility.py --model "$INPUT_MODEL" --tp-size "$TP_SIZE" --max-gpus "${MAX_GPUS_FOR_TP:-${GPU_COUNT:-16}}" --print-shell 2>/dev/null || true)"
+eval "$TP_CHECK_OUT"
+if [[ "${TP_COMPATIBLE:-1}" != "1" ]]; then
+  echo "WARNING: Requested TP_SIZE=$TP_SIZE is not compatible with $INPUT_MODEL." | tee -a "$QUANT_LOG_DIR/tp_compatibility.txt"
+  echo "  num_attention_heads=${MODEL_NUM_ATTENTION_HEADS:-unknown}" | tee -a "$QUANT_LOG_DIR/tp_compatibility.txt"
+  echo "  num_key_value_heads=${MODEL_NUM_KEY_VALUE_HEADS:-unknown}" | tee -a "$QUANT_LOG_DIR/tp_compatibility.txt"
+  echo "  valid TP sizes: ${VALID_TP_SIZES:-unknown}" | tee -a "$QUANT_LOG_DIR/tp_compatibility.txt"
+  if [[ "$AUTO_ADJUST_TP_SIZE" == "1" && -n "${SUGGESTED_TP_SIZE:-}" ]]; then
+    echo "Auto-adjusting TP_SIZE: $TP_SIZE -> $SUGGESTED_TP_SIZE" | tee -a "$QUANT_LOG_DIR/tp_compatibility.txt"
+    TP_SIZE="$SUGGESTED_TP_SIZE"
+  else
+    echo "ERROR: Set TP_SIZE to one of: ${VALID_TP_SIZES:-unknown}, or set AUTO_ADJUST_TP_SIZE=1." >&2
+    exit 3
+  fi
+fi
+
 # Keep a machine-readable config record for reproducibility.
 cat > "$QUANT_LOG_DIR/quantize_env.txt" <<EOM
 QUANTIZE_SCRIPT=$QUANTIZE_SCRIPT
