@@ -11,6 +11,7 @@ export HF_HOME="${HF_HOME:-/workspace/hf-cache}"
 export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
 export MODEL_ROOT="${MODEL_ROOT:-/workspace/models}"
+export ENGINE_ROOT="${ENGINE_ROOT:-/workspace/engines}"
 
 # Public pre-quantized baseline from prior assignment.
 export PREQUANT_NVFP4_MODEL_ID="${PREQUANT_NVFP4_MODEL_ID:-nvidia/Qwen3-Coder-480B-A35B-Instruct-NVFP4}"

@@ -28,8 +28,24 @@ case "$TARGET" in
     QUANTIZATION="${QUANTIZATION:-small_folded_nvfp4}"
     DECODE_MODE="${DECODE_MODE:-folded}"
     ;;
+  selected_original_nvfp4_engine)
+    # Engine-serving target produced by scripts/run_selected_nvfp4_pair_engine_benchmark.sh.
+    # PLAN_MODEL is only used by the benchmark client for tokenizer/planning metadata,
+    # not as the server model path. The actual running model is ENGINE_DIR.
+    MODEL_NAME="${MODEL_NAME:-${MODEL_TAG}-NVFP4-engine-tp${TP_SIZE}}"
+    PLAN_MODEL="${PLAN_MODEL:-${ORIG_NVFP4_PATH:-${MODEL_ROOT:-/workspace/models}/${MODEL_TAG}-NVFP4}}"
+    QUANTIZATION="${QUANTIZATION:-selected_original_nvfp4_engine}"
+    DECODE_MODE="${DECODE_MODE:-baseline_engine}"
+    ;;
+  selected_folded_nvfp4_engine)
+    MODEL_NAME="${MODEL_NAME:-${MODEL_TAG}-FOLDED-NVFP4-engine-tp${TP_SIZE}}"
+    PLAN_MODEL="${PLAN_MODEL:-${FOLDED_NVFP4_PATH:-${MODEL_ROOT:-/workspace/models}/${MODEL_TAG}-FOLDED-NVFP4}}"
+    QUANTIZATION="${QUANTIZATION:-selected_folded_nvfp4_engine}"
+    DECODE_MODE="${DECODE_MODE:-folded_engine}"
+    ;;
   *)
     echo "Unknown TARGET=$TARGET"
+    echo "Known TARGET values: prequant_nvfp4, folded_nvfp4, folded_gptq_int4, small_folded_nvfp4, selected_original_nvfp4_engine, selected_folded_nvfp4_engine"
     exit 2
     ;;
 esac

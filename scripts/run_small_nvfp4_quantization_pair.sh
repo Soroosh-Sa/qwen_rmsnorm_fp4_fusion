@@ -3,6 +3,12 @@ set -euo pipefail
 source "$(dirname "$0")/common_env.sh"
 print_model_selection
 
+# Resolve TP_SIZE once globally before quantizing either checkpoint.
+# This prevents original/folded quantization from silently using a different TP
+# than the later engine build/benchmark stage.
+eval "$(MODEL_TO_CHECK="$ORIGINAL_MODEL_PATH" bash scripts/resolve_selected_tp_size.sh | tail -n 3)"
+echo "Using resolved TP_SIZE=$TP_SIZE for both original and folded NVFP4 quantization."
+
 # Quantize both versions of the same selected small model:
 #   original BF16 -> NVFP4
 #   folded BF16   -> NVFP4

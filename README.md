@@ -379,3 +379,25 @@ bash scripts/run_selected_nvfp4_pair_engine_benchmark.sh
 ```
 
 Older scripts copied the checkpoint `config.json` over the engine `config.json`. v13 preserves the engine config and stores the checkpoint config as `checkpoint_config.json`.
+
+### Note: engine server works but benchmark says Unknown TARGET
+
+If the log shows `Server health check passed` and then `Unknown TARGET=selected_original_nvfp4_engine`, the TensorRT-LLM engine launched correctly. The failure is only in the benchmark wrapper target mapping. Use repo v14 or newer, where `selected_original_nvfp4_engine` and `selected_folded_nvfp4_engine` are supported benchmark targets.
+
+## v15 selected-model consistency notes
+
+For locally quantized TensorRT-LLM NVFP4 outputs, use the engine path:
+
+```bash
+bash scripts/run_small_nvfp4_quantization_pair.sh
+bash scripts/build_selected_nvfp4_pair_engines.sh
+bash scripts/run_selected_nvfp4_pair_engine_benchmark.sh
+```
+
+Before switching to a different model, run:
+
+```bash
+bash scripts/audit_selected_pipeline.sh
+```
+
+The scripts now keep `TP_SIZE` consistent across quantization, engine build, validation, and benchmark serving. If a quantized checkpoint already exists, its `config.json -> mapping.tp_size` is treated as the source of truth for engine naming and benchmark execution.
