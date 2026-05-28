@@ -61,7 +61,22 @@ DEVICE_MAP="${DEVICE_MAP:-auto}"
 SEED="${SEED:-1234}"
 QUANT_LOG_DIR="${QUANT_LOG_DIR:-quantization_reports/$(basename "$OUTPUT_DIR") }"
 QUANT_LOG_DIR="$(echo "$QUANT_LOG_DIR" | xargs)"
-mkdir -p "$OUTPUT_DIR" "$QUANT_LOG_DIR"
+mkdir -p "$QUANT_LOG_DIR"
+
+# IMPORTANT: TensorRT-LLM/ModelOpt writes rank*.safetensors files whose shapes
+# depend on TP_SIZE. Reusing an output directory from a different TP size can
+# leave stale rank shards and make trtllm-serve fail during weight loading.
+# Generated output dirs are therefore cleaned by default.
+CLEAN_OUTPUT_DIR="${CLEAN_OUTPUT_DIR:-1}"
+if [[ -d "$OUTPUT_DIR" && "$CLEAN_OUTPUT_DIR" == "1" ]]; then
+  echo "Cleaning existing quantization output directory: $OUTPUT_DIR" | tee -a "$QUANT_LOG_DIR/cleanup_output.txt"
+  rm -rf "$OUTPUT_DIR"
+elif [[ -d "$OUTPUT_DIR" && -n "$(find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+  echo "ERROR: OUTPUT_DIR exists and is not empty: $OUTPUT_DIR" >&2
+  echo "Set CLEAN_OUTPUT_DIR=1 to remove and regenerate it, or choose a new OUTPUT_DIR." >&2
+  exit 4
+fi
+mkdir -p "$OUTPUT_DIR"
 
 # TensorRT-LLM requires tensor parallelism to divide model attention heads.
 # Small Qwen models often cannot use TP_SIZE=4 (for example Qwen2.5-0.5B has
@@ -166,6 +181,9 @@ if [[ "$REPAIR_AFTER_QUANT" == "1" ]]; then
     --report "$QUANT_LOG_DIR/repair_report.json" \
     2>&1 | tee "$QUANT_LOG_DIR/repair.log"
 fi
+
+echo "Validating TensorRT-LLM quantized checkpoint layout..."
+python src/validate_trtllm_quantized_checkpoint.py   --model "$OUTPUT_DIR"   --expected-tp-size "$TP_SIZE"   --report "$QUANT_LOG_DIR/checkpoint_validation.json"   2>&1 | tee "$QUANT_LOG_DIR/checkpoint_validation.log"
 
 echo "Quantization output: $OUTPUT_DIR"
 find "$OUTPUT_DIR" -maxdepth 2 -type f | sort | tee "$QUANT_LOG_DIR/output_files.txt"
