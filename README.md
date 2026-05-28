@@ -360,3 +360,7 @@ bash scripts/run_selected_nvfp4_pair_engine_benchmark.sh
 ```
 
 The engine serving path forces `--backend tensorrt` and validates that `.engine`/`.plan` files exist before starting the server.
+
+## Engine serving note
+
+For built TensorRT-LLM engine directories, `scripts/serve_engine_target.sh` intentionally does **not** pass `--backend` by default. In recent TensorRT-LLM containers, the engine path should use the default C++/engine path. Passing `--backend pytorch` forces checkpoint loading, and passing `--backend tensorrt` can still fail in some builds with `assert os.path.isfile(weights_path)`. Leave `TRTLLM_ENGINE_BACKEND` unset unless debugging.
