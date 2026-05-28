@@ -16,6 +16,10 @@ if [[ ! -d "$FOLDED_NVFP4_PATH" ]]; then
   exit 2
 fi
 
+# Always start from a clean runtime and clean again at the end.
+PORT="$PORT" bash scripts/cleanup_trtllm_runtime.sh || true
+trap 'PORT="$PORT" bash scripts/cleanup_trtllm_runtime.sh || true' EXIT INT TERM
+
 export MODEL_PATH="$ORIG_NVFP4_PATH"
 export TARGET=selected_original_nvfp4
 bash "$(dirname "$0")/run_one_target_server_and_benchmark.sh"

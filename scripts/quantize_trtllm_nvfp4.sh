@@ -133,5 +133,19 @@ echo | tee -a "$QUANT_LOG_DIR/quantize_command.sh"
 echo "Running TensorRT-LLM NVFP4 quantization..."
 "${CMD[@]}" 2>&1 | tee "$QUANT_LOG_DIR/quantize.log"
 
+# TensorRT-LLM/ModelOpt exports sometimes omit generation_config.json or
+# write model_type=qwen for Qwen2.x, which Transformers in the container may
+# not recognize. Repair metadata so trtllm-serve can load the exported checkpoint.
+REPAIR_AFTER_QUANT="${REPAIR_AFTER_QUANT:-1}"
+if [[ "$REPAIR_AFTER_QUANT" == "1" ]]; then
+  echo "Repairing quantized checkpoint metadata..."
+  python src/repair_trtllm_quantized_checkpoint.py \
+    --source "$INPUT_MODEL" \
+    --output "$OUTPUT_DIR" \
+    --check-autoconfig \
+    --report "$QUANT_LOG_DIR/repair_report.json" \
+    2>&1 | tee "$QUANT_LOG_DIR/repair.log"
+fi
+
 echo "Quantization output: $OUTPUT_DIR"
 find "$OUTPUT_DIR" -maxdepth 2 -type f | sort | tee "$QUANT_LOG_DIR/output_files.txt"
