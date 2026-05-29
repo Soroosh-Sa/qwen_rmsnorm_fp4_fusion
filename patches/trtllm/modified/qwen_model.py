@@ -148,13 +148,44 @@ class QWenDecoderLayer(Module):
                 "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION does not support LoRA yet."
             )
 
-        # Only handle the normal dense Qwen/Qwen2 GatedMLP path first.
-        # Do not silently apply this to MoE/SharedMoE variants.
-        required_attrs = ("fc", "gate", "proj", "hidden_act")
-        if not all(hasattr(self.mlp, name) for name in required_attrs):
+        # Only handle dense Qwen/Qwen2 MLP variants first.
+        # Supported for now:
+        #   1. GatedMLP      : fc + gate + proj
+        #   2. FusedGatedMLP : fused_fc + proj
+        #
+        # MoE / SharedMoE will be handled later.
+        has_gated_mlp = all(
+            hasattr(self.mlp, name) for name in ("fc", "gate", "proj")
+        )
+
+        has_fused_gated_mlp = all(
+            hasattr(self.mlp, name) for name in ("fused_fc", "proj")
+        )
+
+        if not has_gated_mlp and not has_fused_gated_mlp:
+            mlp_attrs = sorted([
+                name for name in dir(self.mlp)
+                if not name.startswith("_")
+            ])
             raise NotImplementedError(
-                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION currently supports only dense GatedMLP "
-                "with fc/gate/proj. MoE/SharedMoE is not supported yet."
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION currently supports only dense "
+                "GatedMLP or FusedGatedMLP. "
+                f"Actual mlp class: {self.mlp.__class__.__name__}. "
+                f"Available attrs: {mlp_attrs[:80]}"
+            )
+
+        if has_fused_gated_mlp:
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION reached FusedGatedMLP. "
+                "This is expected in some TensorRT-LLM configs, but this first patch "
+                "currently implements only the split fc/gate GatedMLP path. "
+                "Next step is to add fused_fc split support."
+            )
+
+        if not hasattr(self.mlp, "hidden_act") and not hasattr(self.config, "hidden_act"):
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION could not find hidden_act "
+                "on self.mlp or self.config."
             )
 
         if getattr(self.mlp, "inner_layernorm", None) is not None:
@@ -217,8 +248,10 @@ class QWenDecoderLayer(Module):
 
         inter = self.mlp.fc(hidden_states)
         inter = inter / rms
-        inter = ACT2FN[self.mlp.hidden_act](inter)
-
+        hidden_act = getattr(self.mlp, "hidden_act",
+                             getattr(self.config, "hidden_act", None))
+        inter = ACT2FN[hidden_act](inter)
+        
         gate = self.mlp.gate(hidden_states)
         gate = gate / rms
 
