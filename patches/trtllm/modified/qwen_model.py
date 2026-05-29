@@ -21,7 +21,7 @@ import torch
 from tqdm import tqdm
 
 from ..._utils import pad_vocab_size
-from ...functional import ACT2FN, LayerNormType, Tensor, cast, mean, sqrt, recv, send
+from ...functional import ACT2FN, LayerNormType, Tensor, cast, mean, sqrt, split, recv, send
 from ...layers import (MOE, Attention, AttentionMaskType, ColumnLinear,
                        Embedding, GatedMLP, RmsNorm, SharedMoE)
 from ...layers.moe import MOEWeightWrapper
@@ -174,13 +174,6 @@ class QWenDecoderLayer(Module):
                 f"Available attrs: {mlp_attrs[:80]}"
             )
 
-        if has_fused_gated_mlp:
-            raise NotImplementedError(
-                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION reached FusedGatedMLP. "
-                "This is expected in some TensorRT-LLM configs, but this first patch "
-                "currently implements only the split fc/gate GatedMLP path. "
-                "Next step is to add fused_fc split support."
-            )
 
         if not hasattr(self.mlp, "hidden_act") and not hasattr(self.config, "hidden_act"):
             raise NotImplementedError(
@@ -225,16 +218,22 @@ class QWenDecoderLayer(Module):
             hidden_states = post_layernorm(hidden_states)
             hidden_states = mlp(hidden_states)
 
-        with:
+        with folded-weight equivalent:
 
             rms = sqrt(mean(hidden_states^2) + eps)
-            inter = mlp.fc(hidden_states) / rms
-            gate  = mlp.gate(hidden_states) / rms
+
+            For GatedMLP:
+                inter = mlp.fc(hidden_states) / rms
+                gate  = mlp.gate(hidden_states) / rms
+
+            For FusedGatedMLP:
+                raw_gate_up = mlp.fused_fc(hidden_states) / rms
+                inter, gate = split(raw_gate_up)
+
             hidden_states = mlp.proj(ACT(inter) * gate)
 
         This assumes folded weights:
-            fc.weight   already includes post_layernorm.weight
-            gate.weight already includes post_layernorm.weight
+            fc/fused_fc weight already includes post_layernorm.weight
             post_layernorm.weight == 1
         """
         x_fp32 = cast(hidden_states, "float32")
@@ -246,16 +245,31 @@ class QWenDecoderLayer(Module):
         # Cast back before applying to MLP outputs.
         rms = cast(rms, self.config.dtype)
 
-        inter = self.mlp.fc(hidden_states)
-        inter = inter / rms
         hidden_act = getattr(self.mlp, "hidden_act",
                              getattr(self.config, "hidden_act", None))
-        inter = ACT2FN[hidden_act](inter)
-        
-        gate = self.mlp.gate(hidden_states)
-        gate = gate / rms
 
+        if hasattr(self.mlp, "fused_fc"):
+            # FusedGatedMLP path:
+            # fused_fc output shape is [..., 2 * ffn_hidden_size / tp_size].
+            raw_gate_up = self.mlp.fused_fc(hidden_states)
+            raw_gate_up = raw_gate_up / rms
+
+            split_size = self.mlp.ffn_hidden_size // self.mlp.tp_size
+            inter, gate = split(raw_gate_up, split_size, dim=-1)
+
+        else:
+            # Plain GatedMLP path:
+            inter = self.mlp.fc(hidden_states)
+            inter = inter / rms
+
+            gate = self.mlp.gate(hidden_states)
+            gate = gate / rms
+
+        inter = ACT2FN[hidden_act](inter)
         intermediate = inter * gate
+
+        if getattr(self.mlp, "inner_layernorm", None) is not None:
+            intermediate = self.mlp.inner_layernorm(intermediate)
 
         output = self.mlp.proj(intermediate)
         return output
