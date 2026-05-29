@@ -21,7 +21,7 @@ import torch
 from tqdm import tqdm
 
 from ..._utils import pad_vocab_size
-from ...functional import ACT2FN, LayerNormType, Tensor, cast, recv, send
+from ...functional import ACT2FN, LayerNormType, Tensor, cast, mean, sqrt, recv, send
 from ...layers import (MOE, Attention, AttentionMaskType, ColumnLinear,
                        Embedding, GatedMLP, RmsNorm, SharedMoE)
 from ...layers.moe import MOEWeightWrapper
@@ -206,10 +206,11 @@ class QWenDecoderLayer(Module):
             gate.weight already includes post_layernorm.weight
             post_layernorm.weight == 1
         """
-        # Compute RMS in FP32, similar in spirit to RMSNorm implementations.
         x_fp32 = cast(hidden_states, "float32")
-        rms = ((x_fp32 * x_fp32).mean(-1, keepdim=True) +
-               self.post_layernorm.eps).sqrt()
+        rms = sqrt(
+            mean(x_fp32 * x_fp32, dim=-1, keepdim=True) +
+            self.post_layernorm.eps
+        )
 
         # Cast back before applying to MLP outputs.
         rms = cast(rms, self.config.dtype)
