@@ -402,24 +402,19 @@ bash scripts/audit_selected_pipeline.sh
 
 The scripts now keep `TP_SIZE` consistent across quantization, engine build, validation, and benchmark serving. If a quantized checkpoint already exists, its `config.json -> mapping.tp_size` is treated as the source of truth for engine naming and benchmark execution.
 
+## Folded NVFP4 dual-plugin path
 
-## NVFP4 plugin implementation status
-
-The current TensorRT plugin supports the folded RMS-scale SwiGLU math for BF16/FP16
-activation interfaces and has both fused and plain GatedMLP variants. For a true
-NVFP4-output plugin, first run:
+After creating the folded BF16 checkpoint, the current safe NVFP4 path is:
 
 ```bash
-bash scripts/run_nvfp4_stage0_collect_and_inspect.sh
+export MODEL_PROFILE=qwen25_05b
+export TP_SIZE=2
+export CALIB_SIZE=16
+export CALIB_MAX_SEQ_LENGTH=256
+export CALIB_BATCH_SIZE=1
+bash scripts/run_folded_nvfp4_dual_plugin_fast.sh
 ```
 
-Then read:
+This uses `TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN_MODE=bf16_intermediate`: the RMS-scale-SwiGLU plugin returns BF16/FP16 intermediate, and TensorRT-LLM's existing NVFP4 projection linear quantizes that intermediate internally.
 
-```text
-docs/nvfp4_understanding_and_step_plan.md
-runtime_logs/nvfp4_refs/summary.txt
-runtime_logs/folded_nvfp4_checkpoint_inspection.txt
-```
-
-Do not add a fake FP4-output plugin before confirming the exact TensorRT-LLM
-NVFP4 activation/scale interface used by the target engine.
+See `docs/nvfp4_contract_and_next_steps.md` for the explicit FP4-output plan and why that mode requires replacing the projection with a prequant NVFP4 GEMM.

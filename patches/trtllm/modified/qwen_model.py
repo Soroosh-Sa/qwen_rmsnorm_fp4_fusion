@@ -45,6 +45,37 @@ from .convert import (load_hf_qwen, load_weights_from_hf_gptq_model,
 _QWEN_RMS_SCALE_SWIGLU_PLUGIN_LOADED = False
 
 
+def _qwen_rms_scale_swiglu_plugin_mode():
+    """Return the requested plugin mode.
+
+    Supported today:
+      - off: disable plugin
+      - bf16_intermediate: plugin returns BF16/FP16 intermediate, then the
+        existing MLP proj layer handles BF16/FP16 or NVFP4 internally.
+
+    Planned, not implemented yet:
+      - nvfp4_prequant: plugin returns packed FP4 intermediate + scale tensor
+        and the proj layer must be replaced with a prequant NVFP4 GEMM.
+    """
+    mode = os.environ.get("TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN_MODE", "").strip().lower()
+
+    if mode in ("", "1", "true", "on", "bf16", "fp16", "bf16_intermediate"):
+        return "bf16_intermediate"
+    if mode in ("0", "false", "off", "none", "disable", "disabled"):
+        return "off"
+    if mode in ("nvfp4", "fp4", "nvfp4_prequant", "explicit_fp4"):
+        raise NotImplementedError(
+            "TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN_MODE=nvfp4_prequant is not implemented yet. "
+            "A true FP4-output plugin must return both packed uint8 FP4 activations and "
+            "TensorRT-LLM-compatible scale factors, then replace mlp.proj with a prequant "
+            "NVFP4 GEMM. Use bf16_intermediate for the current safe NVFP4 path."
+        )
+    raise ValueError(
+        f"Unsupported TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN_MODE={mode!r}. "
+        "Use off, bf16_intermediate, or nvfp4_prequant once implemented."
+    )
+
+
 def _load_qwen_rms_scale_swiglu_plugin():
     """Load the external TensorRT plugin .so once during engine build/runtime."""
     global _QWEN_RMS_SCALE_SWIGLU_PLUGIN_LOADED
@@ -334,7 +365,9 @@ class QWenDecoderLayer(Module):
         hidden_act = getattr(self.mlp, "hidden_act",
                              getattr(self.config, "hidden_act", None))
 
-        use_plugin = os.environ.get("TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN", "0") == "1"
+        plugin_requested = os.environ.get("TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN", "0") == "1"
+        plugin_mode = _qwen_rms_scale_swiglu_plugin_mode() if plugin_requested else "off"
+        use_plugin = plugin_mode == "bf16_intermediate"
 
         if hasattr(self.mlp, "fused_fc"):
             # FusedGatedMLP path:
