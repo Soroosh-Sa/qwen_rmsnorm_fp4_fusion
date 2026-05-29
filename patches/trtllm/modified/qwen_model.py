@@ -21,7 +21,7 @@ import torch
 from tqdm import tqdm
 
 from ..._utils import pad_vocab_size
-from ...functional import LayerNormType, Tensor, recv, send
+from ...functional import ACT2FN, LayerNormType, Tensor, cast, recv, send
 from ...layers import (MOE, Attention, AttentionMaskType, ColumnLinear,
                        Embedding, GatedMLP, RmsNorm, SharedMoE)
 from ...layers.moe import MOEWeightWrapper
@@ -126,6 +126,106 @@ class QWenDecoderLayer(Module):
                                       eps=config.norm_epsilon,
                                       dtype=dtype)
 
+    def _use_folded_rmsnorm_mlp_fusion(self, lora_layer_params=None):
+        """
+        Experimental Runara-style folded RMSNorm + MLP fusion.
+
+        This path is only correct when the checkpoint has already folded
+        post_attention_layernorm.weight into mlp.fc and mlp.gate, and the
+        post_attention_layernorm.weight itself has been reset to 1.
+
+        Enable with:
+            TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION=1
+
+        By default this is BF16/FP16-only. For NVFP4 experiments later:
+            TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION_ALLOW_QUANTIZED=1
+        """
+        if os.environ.get("TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION", "0") != "1":
+            return False
+
+        if lora_layer_params is not None:
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION does not support LoRA yet."
+            )
+
+        # Only handle the normal dense Qwen/Qwen2 GatedMLP path first.
+        # Do not silently apply this to MoE/SharedMoE variants.
+        required_attrs = ("fc", "gate", "proj", "hidden_act")
+        if not all(hasattr(self.mlp, name) for name in required_attrs):
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION currently supports only dense GatedMLP "
+                "with fc/gate/proj. MoE/SharedMoE is not supported yet."
+            )
+
+        if getattr(self.mlp, "inner_layernorm", None) is not None:
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION does not support inner_layernorm yet."
+            )
+
+        # Bias is important mathematically:
+        # correct: (x @ W.T) / rms + b
+        # wrong:   (x @ W.T + b) / rms
+        # The current graph-level patch calls self.mlp.fc(x) and self.mlp.gate(x),
+        # so it is only exact when those projections are bias-free.
+        if getattr(self.config, "mlp_bias", False) or getattr(self.mlp, "bias", False):
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION currently requires bias-free MLP projections."
+            )
+
+        quantization = getattr(self.config, "quantization", None)
+        quant_algo = getattr(quantization, "quant_algo", None)
+        allow_quantized = os.environ.get(
+            "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION_ALLOW_QUANTIZED", "0"
+        ) == "1"
+
+        if quant_algo is not None and not allow_quantized:
+            raise NotImplementedError(
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION is currently enabled only for BF16/FP16. "
+                "For NVFP4 experiments, set "
+                "TRTLLM_QWEN_FOLDED_RMSNORM_MLP_FUSION_ALLOW_QUANTIZED=1."
+            )
+
+        return True
+
+    def _folded_rmsnorm_mlp_fusion_forward(self, hidden_states):
+        """
+        Replace:
+
+            hidden_states = post_layernorm(hidden_states)
+            hidden_states = mlp(hidden_states)
+
+        with:
+
+            rms = sqrt(mean(hidden_states^2) + eps)
+            inter = mlp.fc(hidden_states) / rms
+            gate  = mlp.gate(hidden_states) / rms
+            hidden_states = mlp.proj(ACT(inter) * gate)
+
+        This assumes folded weights:
+            fc.weight   already includes post_layernorm.weight
+            gate.weight already includes post_layernorm.weight
+            post_layernorm.weight == 1
+        """
+        # Compute RMS in FP32, similar in spirit to RMSNorm implementations.
+        x_fp32 = cast(hidden_states, "float32")
+        rms = ((x_fp32 * x_fp32).mean(-1, keepdim=True) +
+               self.post_layernorm.eps).sqrt()
+
+        # Cast back before applying to MLP outputs.
+        rms = cast(rms, self.config.dtype)
+
+        inter = self.mlp.fc(hidden_states)
+        inter = inter / rms
+        inter = ACT2FN[self.mlp.hidden_act](inter)
+
+        gate = self.mlp.gate(hidden_states)
+        gate = gate / rms
+
+        intermediate = inter * gate
+
+        output = self.mlp.proj(intermediate)
+        return output
+
     def forward(
         self,
         hidden_states: Tensor,
@@ -156,12 +256,16 @@ class QWenDecoderLayer(Module):
 
         residual = hidden_states
 
-        hidden_states = self.post_layernorm(hidden_states)
+        if self._use_folded_rmsnorm_mlp_fusion(lora_layer_params):
+            hidden_states = self._folded_rmsnorm_mlp_fusion_forward(hidden_states)
+        else:
+            hidden_states = self.post_layernorm(hidden_states)
 
-        hidden_states = self.mlp(hidden_states,
-                                 lora_layer_params=lora_layer_params)
+            hidden_states = self.mlp(hidden_states,
+                                     lora_layer_params=lora_layer_params)
 
         hidden_states = residual + hidden_states
+        
         if use_cache:
             return (hidden_states, presents)
         return hidden_states
