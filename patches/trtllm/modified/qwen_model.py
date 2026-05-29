@@ -255,7 +255,7 @@ class QWenDecoderLayer(Module):
             raw_gate_up = raw_gate_up / rms
 
             split_size = self.mlp.ffn_hidden_size // self.mlp.tp_size
-            inter, gate = split(raw_gate_up, split_size, dim=-1)
+            gate, inter = split(raw_gate_up, split_size, dim=-1)
 
         else:
             # Plain GatedMLP path:
