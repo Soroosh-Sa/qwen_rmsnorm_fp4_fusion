@@ -12,8 +12,22 @@ case "$TARGET" in
     ENGINE_DIR="${ENGINE_DIR:-${FOLDED_ENGINE_DIR:-${ENGINE_ROOT:-/workspace/engines}/${MODEL_TAG}-FOLDED-NVFP4-engine-tp${TP_SIZE}}}"
     TOKENIZER_DIR="${TOKENIZER_DIR:-$FOLDED_NVFP4_PATH}"
     ;;
+  selected_folded_nvfp4_plugin_engine)
+    ENGINE_DIR="${ENGINE_DIR:-${FOLDED_NVFP4_PLUGIN_ENGINE:-${ENGINE_ROOT:-/workspace/engines}/${MODEL_TAG}-FOLDED-NVFP4-rms-scale-swiglu-plugin-engine-tp${TP_SIZE}}}"
+    TOKENIZER_DIR="${TOKENIZER_DIR:-$FOLDED_NVFP4_PATH}"
+    PLUGIN_SO_DEFAULT="$(pwd)/build/qwen_rms_scale_swiglu_plugin/libqwen_rms_scale_swiglu_plugin.so"
+    export QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO="${QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO:-$PLUGIN_SO_DEFAULT}"
+    if [[ ! -f "$QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO" ]]; then
+      echo "ERROR: plugin engine target requires plugin .so, but it was not found:" >&2
+      echo "  QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO=$QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO" >&2
+      echo "Build it first with: bash scripts/build_qwen_rms_scale_swiglu_plugin.sh" >&2
+      exit 4
+    fi
+    export LD_PRELOAD="$QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO:${LD_PRELOAD:-}"
+    ;;
   *)
     echo "ERROR: Unknown engine TARGET=$TARGET" >&2
+    echo "Known engine targets: selected_original_nvfp4_engine, selected_folded_nvfp4_engine, selected_folded_nvfp4_plugin_engine" >&2
     exit 2
     ;;
 esac
@@ -63,6 +77,9 @@ echo "Starting TensorRT-LLM engine server"
 echo "TARGET=$TARGET"
 echo "ENGINE_DIR=$ENGINE_DIR"
 echo "TOKENIZER_DIR=$TOKENIZER_DIR"
+if [[ "$TARGET" == "selected_folded_nvfp4_plugin_engine" ]]; then
+  echo "QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO=$QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO"
+fi
 echo "MAX_SEQ_LEN=$MAX_SEQ_LEN"
 echo "MAX_NUM_TOKENS=$MAX_NUM_TOKENS"
 echo "EXTRA_ARGS=${EXTRA_ARGS[*]}"

@@ -43,9 +43,15 @@ case "$TARGET" in
     QUANTIZATION="${QUANTIZATION:-selected_folded_nvfp4_engine}"
     DECODE_MODE="${DECODE_MODE:-folded_engine}"
     ;;
+  selected_folded_nvfp4_plugin_engine)
+    MODEL_NAME="${MODEL_NAME:-${MODEL_TAG}-FOLDED-NVFP4-rms-scale-swiglu-plugin-engine-tp${TP_SIZE}}"
+    PLAN_MODEL="${PLAN_MODEL:-${FOLDED_NVFP4_PATH:-${MODEL_ROOT:-/workspace/models}/${MODEL_TAG}-FOLDED-NVFP4}}"
+    QUANTIZATION="${QUANTIZATION:-selected_folded_nvfp4_plugin_engine}"
+    DECODE_MODE="${DECODE_MODE:-folded_plugin_engine}"
+    ;;
   *)
     echo "Unknown TARGET=$TARGET"
-    echo "Known TARGET values: prequant_nvfp4, folded_nvfp4, folded_gptq_int4, small_folded_nvfp4, selected_original_nvfp4_engine, selected_folded_nvfp4_engine"
+    echo "Known TARGET values: prequant_nvfp4, folded_nvfp4, folded_gptq_int4, small_folded_nvfp4, selected_original_nvfp4_engine, selected_folded_nvfp4_engine, selected_folded_nvfp4_plugin_engine"
     exit 2
     ;;
 esac

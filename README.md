@@ -418,3 +418,61 @@ bash scripts/run_folded_nvfp4_dual_plugin_fast.sh
 This uses `TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN_MODE=bf16_intermediate`: the RMS-scale-SwiGLU plugin returns BF16/FP16 intermediate, and TensorRT-LLM's existing NVFP4 projection linear quantizes that intermediate internally.
 
 See `docs/nvfp4_contract_and_next_steps.md` for the explicit FP4-output plan and why that mode requires replacing the projection with a prequant NVFP4 GEMM.
+
+## Current Stage 6 benchmark: normal NVFP4 vs folded base vs folded plugin
+
+After Stage 5 generation sanity passes, the final benchmark is the three-way comparison:
+
+```text
+A. normal/original NVFP4 TensorRT-LLM engine
+B. folded-weight NVFP4 base TensorRT-LLM engine, no custom plugin
+C. folded-weight NVFP4 TensorRT-LLM engine with QwenRmsScaleSwiglu plugin
+```
+
+The summary reports:
+
+```text
+C vs A: final real comparison against standard NVFP4 TensorRT-LLM
+C vs B: plugin/graph effect after folding
+B vs A: folding + requantization effect without plugin
+```
+
+Run:
+
+```bash
+export MODEL_PROFILE=qwen25_05b
+export TP_SIZE=2
+export CONTEXTS="1024 2048"
+export CONCURRENCIES="1 2"
+export NUM_REQUESTS=20
+export MAX_NEW_TOKENS=64
+export OPENAI_API_MODE=completion
+export COMPLETION_STREAM=0
+
+bash scripts/run_nvfp4_normal_vs_folded_vs_plugin_benchmark.sh
+```
+
+The backward-compatible entrypoints also run this final three-way benchmark:
+
+```bash
+bash scripts/run_selected_nvfp4_pair_benchmark.sh
+bash scripts/run_selected_nvfp4_pair_engine_benchmark.sh
+```
+
+Outputs:
+
+```text
+results/<MODEL_TAG>_normal_nvfp4_engine_benchmark.csv
+results/<MODEL_TAG>_folded_nvfp4_base_engine_benchmark.csv
+results/<MODEL_TAG>_folded_nvfp4_plugin_engine_benchmark.csv
+results/<MODEL_TAG>_nvfp4_normal_vs_folded_vs_plugin_summary.csv
+```
+
+For only the ablation B vs C, use:
+
+```bash
+bash scripts/run_folded_nvfp4_base_vs_plugin_benchmark.sh
+```
+
+See `docs/stage6_nvfp4_three_way_benchmark.md` for details.
+
