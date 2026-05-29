@@ -1,6 +1,7 @@
 #include "qwenRmsScaleSwigluKernel.h"
 
 #include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <math.h>
 
@@ -22,10 +23,8 @@ __device__ __forceinline__ float warpReduceSum(float val)
     return val;
 }
 
-__device__ __forceinline__ float blockReduceSum(float val)
+__device__ __forceinline__ float blockReduceSum(float val, float* shared)
 {
-    static __shared__ float shared[32];
-
     int lane = threadIdx.x & 31;
     int wid = threadIdx.x >> 5;
 
@@ -53,11 +52,41 @@ __device__ __forceinline__ float fastSilu(float x)
     return x / (1.0f + __expf(-x));
 }
 
-template <int BLOCK_SIZE>
-__global__ void qwenRmsScaleSwigluBf16Kernel(
-    __nv_bfloat16 const* __restrict__ hiddenStates,
-    __nv_bfloat16 const* __restrict__ rawGateUp,
-    __nv_bfloat16* __restrict__ output,
+template <typename T>
+__device__ __forceinline__ float toFloat(T v);
+
+template <>
+__device__ __forceinline__ float toFloat<__nv_bfloat16>(__nv_bfloat16 v)
+{
+    return __bfloat162float(v);
+}
+
+template <>
+__device__ __forceinline__ float toFloat<half>(half v)
+{
+    return __half2float(v);
+}
+
+template <typename T>
+__device__ __forceinline__ T fromFloat(float v);
+
+template <>
+__device__ __forceinline__ __nv_bfloat16 fromFloat<__nv_bfloat16>(float v)
+{
+    return __float2bfloat16(v);
+}
+
+template <>
+__device__ __forceinline__ half fromFloat<half>(float v)
+{
+    return __float2half(v);
+}
+
+template <typename T, int BLOCK_SIZE>
+__global__ void qwenRmsScaleSwigluKernel(
+    T const* __restrict__ hiddenStates,
+    T const* __restrict__ rawGateUp,
+    T* __restrict__ output,
     int32_t numTokens,
     int32_t hiddenSize,
     int32_t interSize,
@@ -71,20 +100,21 @@ __global__ void qwenRmsScaleSwigluBf16Kernel(
         return;
     }
 
-    __nv_bfloat16 const* hiddenRow = hiddenStates + tokenIdx * hiddenSize;
-    __nv_bfloat16 const* gateRow = rawGateUp + tokenIdx * (2 * interSize);
-    __nv_bfloat16 const* upRow = gateRow + interSize;
-    __nv_bfloat16* outRow = output + tokenIdx * interSize;
+    T const* hiddenRow = hiddenStates + tokenIdx * hiddenSize;
+    T const* gateRow = rawGateUp + tokenIdx * (2 * interSize);
+    T const* upRow = gateRow + interSize;
+    T* outRow = output + tokenIdx * interSize;
 
     float localSum = 0.0f;
 
     for (int i = tid; i < hiddenSize; i += BLOCK_SIZE)
     {
-        float v = __bfloat162float(hiddenRow[i]);
+        float v = toFloat<T>(hiddenRow[i]);
         localSum += v * v;
     }
 
-    float sum = blockReduceSum(localSum);
+    __shared__ float reduceShared[32];
+    float sum = blockReduceSum(localSum, reduceShared);
 
     __shared__ float sharedRstd;
 
@@ -99,29 +129,26 @@ __global__ void qwenRmsScaleSwigluBf16Kernel(
 
     for (int j = tid; j < interSize; j += BLOCK_SIZE)
     {
-        float gate = __bfloat162float(gateRow[j]) * rstd;
-        float up = __bfloat162float(upRow[j]) * rstd;
-
+        float gate = toFloat<T>(gateRow[j]) * rstd;
+        float up = toFloat<T>(upRow[j]) * rstd;
         float y = fastSilu(up) * gate;
-
-        outRow[j] = __float2bfloat16(y);
+        outRow[j] = fromFloat<T>(y);
     }
 }
 
-} // namespace
-
-void invokeQwenRmsScaleSwigluBf16(QwenRmsScaleSwigluParams const& params)
+template <typename T>
+void invokeTyped(QwenRmsScaleSwigluParams const& params)
 {
     constexpr int BLOCK_SIZE = 256;
 
-    auto const* hiddenStates = reinterpret_cast<__nv_bfloat16 const*>(params.hiddenStates);
-    auto const* rawGateUp = reinterpret_cast<__nv_bfloat16 const*>(params.rawGateUp);
-    auto* output = reinterpret_cast<__nv_bfloat16*>(params.output);
+    auto const* hiddenStates = reinterpret_cast<T const*>(params.hiddenStates);
+    auto const* rawGateUp = reinterpret_cast<T const*>(params.rawGateUp);
+    auto* output = reinterpret_cast<T*>(params.output);
 
     dim3 grid(params.numTokens);
     dim3 block(BLOCK_SIZE);
 
-    qwenRmsScaleSwigluBf16Kernel<BLOCK_SIZE><<<grid, block, 0, params.stream>>>(
+    qwenRmsScaleSwigluKernel<T, BLOCK_SIZE><<<grid, block, 0, params.stream>>>(
         hiddenStates,
         rawGateUp,
         output,
@@ -129,6 +156,18 @@ void invokeQwenRmsScaleSwigluBf16(QwenRmsScaleSwigluParams const& params)
         params.hiddenSize,
         params.interSize,
         params.eps);
+}
+
+} // namespace
+
+void invokeQwenRmsScaleSwigluBf16(QwenRmsScaleSwigluParams const& params)
+{
+    invokeTyped<__nv_bfloat16>(params);
+}
+
+void invokeQwenRmsScaleSwigluFp16(QwenRmsScaleSwigluParams const& params)
+{
+    invokeTyped<half>(params);
 }
 
 } // namespace kernels

@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <cstdint>
 
 namespace tensorrt_llm
@@ -24,6 +25,7 @@ struct QwenRmsScaleSwigluParams
 };
 
 void invokeQwenRmsScaleSwigluBf16(QwenRmsScaleSwigluParams const& params);
+void invokeQwenRmsScaleSwigluFp16(QwenRmsScaleSwigluParams const& params);
 
 } // namespace kernels
 } // namespace tensorrt_llm
