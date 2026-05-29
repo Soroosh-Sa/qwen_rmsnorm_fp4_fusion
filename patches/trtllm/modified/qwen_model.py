@@ -63,29 +63,32 @@ def _load_qwen_rms_scale_swiglu_plugin():
     _QWEN_RMS_SCALE_SWIGLU_PLUGIN_LOADED = True
 
 
-def qwen_rms_scale_swiglu_plugin(hidden_states, raw_gate_up, hidden_size, inter_size, eps):
-    """
-    Insert the custom TensorRT plugin that computes:
-        rstd = rsqrt(mean(hidden_states^2) + eps)
-        gate = raw_gate_up[..., :inter_size] * rstd
-        up   = raw_gate_up[..., inter_size:] * rstd
-        out  = silu(up) * gate
-
-    This assumes the RMSNorm gamma has already been folded into the preceding
-    MLP gate/up weights before quantization.
-    """
+def _create_qwen_rms_scale_swiglu_plugin(plugin_name, layer_name, fields, input_tensors):
     _load_qwen_rms_scale_swiglu_plugin()
 
     registry = trt.get_plugin_registry()
-    creator = registry.get_plugin_creator("QwenRmsScaleSwiglu", "1", "")
+    creator = registry.get_plugin_creator(plugin_name, "1", "")
     if creator is None:
         raise RuntimeError(
-            "Could not find TensorRT plugin creator QwenRmsScaleSwiglu v1. "
-            "Check that QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO points to the compiled .so "
-            "and that it was loaded with RTLD_GLOBAL."
+            f"Could not find TensorRT plugin creator {plugin_name} v1. "
+            "Check QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO and plugin registration."
         )
 
-    fields = [
+    plugin = creator.create_plugin(
+        layer_name,
+        trt.PluginFieldCollection(fields),
+    )
+
+    layer = default_trtnet().add_plugin_v2(
+        [tensor.trt_tensor for tensor in input_tensors],
+        plugin,
+    )
+
+    return _create_tensor(layer.get_output(0), layer)
+
+
+def _qwen_rms_scale_swiglu_fields(hidden_size, inter_size, eps):
+    return [
         trt.PluginField(
             "hidden_size",
             np.array([hidden_size], dtype=np.int32),
@@ -103,17 +106,47 @@ def qwen_rms_scale_swiglu_plugin(hidden_states, raw_gate_up, hidden_size, inter_
         ),
     ]
 
-    plugin = creator.create_plugin(
-        "qwen_rms_scale_swiglu",
-        trt.PluginFieldCollection(fields),
+
+def qwen_rms_scale_swiglu_fused_plugin(hidden_states, raw_gate_up, hidden_size, inter_size, eps):
+    """
+    FusedGatedMLP plugin. Inputs:
+      hidden_states, raw_gate_up = [raw_gate | raw_inter]
+
+    Computes:
+      rstd = rsqrt(mean(hidden_states^2) + eps)
+      out = silu(raw_inter * rstd) * (raw_gate * rstd)
+    """
+    fields = _qwen_rms_scale_swiglu_fields(hidden_size, inter_size, eps)
+    return _create_qwen_rms_scale_swiglu_plugin(
+        "QwenRmsScaleSwiglu",
+        "qwen_rms_scale_swiglu_fused",
+        fields,
+        [hidden_states, raw_gate_up],
     )
 
-    layer = default_trtnet().add_plugin_v2(
-        [hidden_states.trt_tensor, raw_gate_up.trt_tensor],
-        plugin,
+
+def qwen_rms_scale_swiglu_gated_plugin(hidden_states, raw_gate, raw_inter, hidden_size, inter_size, eps):
+    """
+    Plain GatedMLP plugin. Inputs:
+      hidden_states, raw_gate, raw_inter
+
+    This avoids a TensorRT concat before the plugin and is the preferred path
+    when TensorRT-LLM keeps fc/gate as separate projections for NVFP4.
+    """
+    fields = _qwen_rms_scale_swiglu_fields(hidden_size, inter_size, eps)
+    return _create_qwen_rms_scale_swiglu_plugin(
+        "QwenRmsScaleSwigluGated",
+        "qwen_rms_scale_swiglu_gated",
+        fields,
+        [hidden_states, raw_gate, raw_inter],
     )
 
-    return _create_tensor(layer.get_output(0), layer)
+
+# Backward-compatible alias used by older local patches.
+def qwen_rms_scale_swiglu_plugin(hidden_states, raw_gate_up, hidden_size, inter_size, eps):
+    return qwen_rms_scale_swiglu_fused_plugin(
+        hidden_states, raw_gate_up, hidden_size, inter_size, eps
+    )
 
 
 class QWenDecoderLayer(Module):
@@ -310,7 +343,7 @@ class QWenDecoderLayer(Module):
             split_size = self.mlp.ffn_hidden_size // self.mlp.tp_size
 
             if use_plugin:
-                intermediate = qwen_rms_scale_swiglu_plugin(
+                intermediate = qwen_rms_scale_swiglu_fused_plugin(
                     hidden_states,
                     raw_gate_up,
                     self.config.hidden_size,
@@ -331,28 +364,37 @@ class QWenDecoderLayer(Module):
                 inter = ACT2FN[hidden_act](inter)
                 intermediate = inter * gate
         else:
+            # Plain GatedMLP path. This is common in NVFP4 TensorRT-LLM builds.
+            # We use a separate 3-input plugin instead of concat([gate, inter])
+            # to avoid materializing another tensor.
+            split_size = self.mlp.ffn_hidden_size // self.mlp.tp_size
+
+            raw_inter = self.mlp.fc(hidden_states)
+            raw_gate = self.mlp.gate(hidden_states)
+
             if use_plugin:
-                raise NotImplementedError(
-                    "TRTLLM_QWEN_RMS_SCALE_SWIGLU_PLUGIN=1 currently requires "
-                    "FusedGatedMLP/fused_fc. Plain GatedMLP should use the graph fallback."
+                intermediate = qwen_rms_scale_swiglu_gated_plugin(
+                    hidden_states,
+                    raw_gate,
+                    raw_inter,
+                    self.config.hidden_size,
+                    split_size,
+                    self.post_layernorm.eps,
                 )
+            else:
+                # Plain graph-level folded fallback.
+                x_fp32 = cast(hidden_states, "float32")
+                rms = sqrt(
+                    mean(x_fp32 * x_fp32, dim=-1, keepdim=True) +
+                    self.post_layernorm.eps
+                )
+                rms = cast(rms, self.config.dtype)
 
-            # Plain GatedMLP path: keep graph-level folded fallback.
-            x_fp32 = cast(hidden_states, "float32")
-            rms = sqrt(
-                mean(x_fp32 * x_fp32, dim=-1, keepdim=True) +
-                self.post_layernorm.eps
-            )
-            rms = cast(rms, self.config.dtype)
+                inter = raw_inter / rms
+                gate = raw_gate / rms
 
-            inter = self.mlp.fc(hidden_states)
-            inter = inter / rms
-
-            gate = self.mlp.gate(hidden_states)
-            gate = gate / rms
-
-            inter = ACT2FN[hidden_act](inter)
-            intermediate = inter * gate
+                inter = ACT2FN[hidden_act](inter)
+                intermediate = inter * gate
 
         if getattr(self.mlp, "inner_layernorm", None) is not None:
             intermediate = self.mlp.inner_layernorm(intermediate)

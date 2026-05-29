@@ -26,7 +26,7 @@ verify:
 # Qwen MLP: post_attention_layernorm feeds gate/up projections.
 folding:
   attention_linears: [q_proj, k_proj, v_proj]
-  mlp_linears: [gate_proj, up_proj]
+  mlp_linears: [gate_proj, up_proj, w1, w3]
   set_norm_weights_to_one: true
 
 metrics_dir: metrics

@@ -51,6 +51,42 @@ def _fold_gamma_into_linear(linear: torch.nn.Module, gamma: torch.Tensor) -> Dic
     }
 
 
+def _module_leaf_name(module_name: str) -> str:
+    return module_name.rsplit(".", 1)[-1]
+
+
+def _iter_foldable_linears(root: torch.nn.Module, target_leaf_names: Iterable[str], hidden_size: int):
+    """Yield (qualified_name, module) for Linear-like modules fed by an RMSNorm.
+
+    This supports both dense Qwen MLPs and MoE expert layouts.  For large
+    Qwen/Qwen3-style MoE checkpoints, expert projections are often nested like
+    `mlp.experts.0.gate_proj` or `mlp.experts.0.up_proj`; a direct
+    `hasattr(layer.mlp, "gate_proj")` is not enough.
+
+    We intentionally require weight.shape[1] == hidden_size so we fold only
+    projections that consume the hidden state. This avoids accidentally folding
+    down/proj layers that consume the intermediate dimension.
+    """
+    targets = set(target_leaf_names)
+    seen = set()
+    for name, module in root.named_modules():
+        if not name:
+            continue
+        if id(module) in seen:
+            continue
+        if not hasattr(module, "weight"):
+            continue
+        weight = module.weight
+        if getattr(weight, "ndim", None) != 2:
+            continue
+        if weight.shape[1] != hidden_size:
+            continue
+        if _module_leaf_name(name) not in targets:
+            continue
+        seen.add(id(module))
+        yield name, module
+
+
 @torch.no_grad()
 def fold_qwen_rmsnorms(model: torch.nn.Module, cfg: Dict[str, Any]) -> List[FoldRecord]:
     """Fold Qwen-style RMSNorm gamma into adjacent Linear weights.
@@ -95,22 +131,27 @@ def fold_qwen_rmsnorms(model: torch.nn.Module, cfg: Dict[str, Any]) -> List[Fold
         if hasattr(layer, "post_attention_layernorm") and hasattr(layer, "mlp"):
             norm = layer.post_attention_layernorm
             gamma = norm.weight.detach().clone()
-            for proj_name in mlp_names:
-                if hasattr(layer.mlp, proj_name):
-                    linear = getattr(layer.mlp, proj_name)
-                    stats = _fold_gamma_into_linear(linear, gamma)
-                    records.append(
-                        FoldRecord(
-                            layer_idx=layer_idx,
-                            norm_name="post_attention_layernorm",
-                            linear_name=f"mlp.{proj_name}",
-                            weight_shape=str(tuple(linear.weight.shape)),
-                            gamma_shape=str(tuple(gamma.shape)),
-                            weight_dtype=str(linear.weight.dtype),
-                            **stats,
-                        )
+
+            # Dense MLP and MoE experts are both handled by recursive discovery.
+            # Typical targets are gate_proj/up_proj. Some implementations use
+            # w1/w3 naming, so they can be added in the YAML config.
+            folded_any_mlp = False
+            for rel_name, linear in _iter_foldable_linears(layer.mlp, mlp_names, gamma.shape[0]):
+                stats = _fold_gamma_into_linear(linear, gamma)
+                folded_any_mlp = True
+                records.append(
+                    FoldRecord(
+                        layer_idx=layer_idx,
+                        norm_name="post_attention_layernorm",
+                        linear_name=f"mlp.{rel_name}",
+                        weight_shape=str(tuple(linear.weight.shape)),
+                        gamma_shape=str(tuple(gamma.shape)),
+                        weight_dtype=str(linear.weight.dtype),
+                        **stats,
                     )
-            if set_one:
+                )
+
+            if set_one and folded_any_mlp:
                 norm.weight.data.fill_(1.0)
 
     return records

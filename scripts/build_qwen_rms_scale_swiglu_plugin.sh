@@ -30,10 +30,14 @@ import tensorrt as trt
 
 so = os.environ["QWEN_RMS_SCALE_SWIGLU_PLUGIN_SO"]
 ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
-creator = trt.get_plugin_registry().get_plugin_creator("QwenRmsScaleSwiglu", "1", "")
+registry = trt.get_plugin_registry()
+fused = registry.get_plugin_creator("QwenRmsScaleSwiglu", "1", "")
+gated = registry.get_plugin_creator("QwenRmsScaleSwigluGated", "1", "")
 print("plugin_so:", so)
-print("creator:", creator)
-assert creator is not None, "QwenRmsScaleSwiglu plugin creator was not registered"
-print("PASS: QwenRmsScaleSwiglu plugin registered")
+print("fused_creator:", fused)
+print("gated_creator:", gated)
+assert fused is not None, "QwenRmsScaleSwiglu plugin creator was not registered"
+assert gated is not None, "QwenRmsScaleSwigluGated plugin creator was not registered"
+print("PASS: fused and gated Qwen RMS-scale SwiGLU plugins registered")
 PY
 fi
