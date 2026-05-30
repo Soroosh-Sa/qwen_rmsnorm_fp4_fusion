@@ -1,0 +1,8 @@
+{"id":"cuda_one_sentence","prompt":"Explain CUDA in one sentence.","expected_contains":["GPU","parallel"]}
+{"id":"simple_math","prompt":"Answer only with the final number: what is 17 + 25?","expected_contains":["42"]}
+{"id":"code_summary","prompt":"Read this code and summarize what it does in one sentence:\n\n```python\ndef transform_value(x):\n    y = x + 1\n    z = y * 2\n    if z % 3 == 0:\n        return z - 1\n    return z + 1\n```","expected_contains":["x","1"]}
+{"id":"json_extraction","prompt":"From this JSON object, answer only the value of repo.name: {\"type\":\"PushEvent\",\"repo\":{\"name\":\"ashkanvg/cuJSON\"}}","expected_contains":["ashkanvg/cuJSON"]}
+{"id":"short_reasoning","prompt":"A model generates 64 tokens per request and serves 20 successful requests. How many output tokens are generated in total? Answer briefly.","expected_contains":["1280"]}
+{"id":"definition_rmsnorm","prompt":"In one sentence, what does RMSNorm do in a transformer?","expected_contains":["normal"]}
+{"id":"gpu_memory","prompt":"Give one practical reason why KV cache memory matters for long-context LLM inference.","expected_contains":["memory"]}
+{"id":"safe_refusal_not_needed","prompt":"Write a two-sentence professional update saying the benchmark sanity test passed and benchmarking is continuing.","expected_contains":["benchmark"]}

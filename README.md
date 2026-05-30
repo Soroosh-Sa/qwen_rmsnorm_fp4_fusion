@@ -476,3 +476,34 @@ bash scripts/run_folded_nvfp4_base_vs_plugin_benchmark.sh
 
 See `docs/stage6_nvfp4_three_way_benchmark.md` for details.
 
+
+## Stage 7: output quality sanity check
+
+After the Stage-6 throughput benchmark, run a deterministic three-way output check:
+
+```bash
+export MODEL_PROFILE=qwen25_05b
+export TP_SIZE=2
+export OPENAI_API_MODE=completion
+export COMPLETION_USE_CHAT_TEMPLATE=1
+export QUALITY_MAX_NEW_TOKENS=128
+
+bash scripts/run_nvfp4_three_way_quality_check.sh
+```
+
+This compares:
+
+```text
+A = normal NVFP4 engine
+B = folded NVFP4 base engine
+C = folded NVFP4 plugin engine
+```
+
+and writes:
+
+```text
+results/${MODEL_TAG}_nvfp4_three_way_quality_summary.csv
+results/${MODEL_TAG}_nvfp4_three_way_quality_report.md
+```
+
+Use this to verify that the plugin engine is not producing empty, repetitive, or obviously corrupted text before interpreting the throughput numbers.
